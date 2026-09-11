@@ -2,7 +2,7 @@ import type { MetadataRoute } from 'next';
 import { getJobs } from '@/lib/jobs';
 import { absoluteUrl } from '@/lib/site';
 
-export default function sitemap(): MetadataRoute.Sitemap {
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const staticRoutes: MetadataRoute.Sitemap = [
     { url: absoluteUrl('/'), changeFrequency: 'daily', priority: 1 },
     { url: absoluteUrl('/jobs'), changeFrequency: 'hourly', priority: 0.9 },
@@ -11,7 +11,8 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: absoluteUrl('/terms'), changeFrequency: 'yearly', priority: 0.2 },
   ];
 
-  const jobRoutes: MetadataRoute.Sitemap = getJobs().map(job => ({
+  const jobs = await getJobs();
+  const jobRoutes: MetadataRoute.Sitemap = jobs.map(job => ({
     url: absoluteUrl(`/jobs/${job.slug}`),
     lastModified: job.postedAt ? new Date(job.postedAt) : new Date(),
     changeFrequency: 'daily',
