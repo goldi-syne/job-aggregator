@@ -51,9 +51,7 @@ db.exec(`
 
 function ensureColumn(name: string, definition: string) {
   const columns = db.prepare('PRAGMA table_info(jobs)').all() as Array<{ name: string }>;
-  if (!columns.some(column => column.name === name)) {
-    db.exec(`ALTER TABLE jobs ADD COLUMN ${name} ${definition}`);
-  }
+  if (!columns.some(column => column.name === name)) db.exec(`ALTER TABLE jobs ADD COLUMN ${name} ${definition}`);
 }
 
 ensureColumn('country_code', "TEXT NOT NULL DEFAULT 'US'");
@@ -84,8 +82,9 @@ db.exec(`
 `);
 
 const count = db.prepare('SELECT COUNT(*) AS count FROM jobs').get() as { count: number };
+const shouldSeedDemoJobs = process.env.SEED_DEMO_JOBS === 'true' && process.env.NODE_ENV !== 'production';
 
-if (count.count === 0) {
+if (count.count === 0 && shouldSeedDemoJobs) {
   const insert = db.prepare(`
     INSERT INTO jobs (
       slug, title, company, location, experience, job_type, skills, summary,
@@ -128,9 +127,7 @@ if (count.count === 0) {
     }
   ];
 
-  const seed = db.transaction(() => {
-    for (const job of seedJobs) insert.run(job);
-  });
+  const seed = db.transaction(() => { for (const job of seedJobs) insert.run(job); });
   seed();
 }
 
