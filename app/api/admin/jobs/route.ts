@@ -39,6 +39,9 @@ function normalize(raw: Record<string, unknown>) {
   };
 }
 
+type NormalizedJob = ReturnType<typeof normalize>;
+type ExistingJob = { apply_url: string };
+
 export async function GET() {
   if (!(await isAdminAuthenticated())) return NextResponse.json({error:'Unauthorized'},{status:401});
   const {data,error}=await getSupabaseAdminClient().from('jobs').select('id,title,company,location,source,status,posted_at,apply_url').order('created_at',{ascending:false}).limit(100);
@@ -47,15 +50,18 @@ export async function GET() {
 
 export async function POST(request: Request) {
   if (!(await isAdminAuthenticated())) return NextResponse.json({error:'Unauthorized'},{status:401});
-  const body=await request.json().catch(()=>({}));
-  const rawJobs=Array.isArray(body.jobs) ? body.jobs : [body.job || body];
+  const body: Record<string, unknown> = await request.json().catch(()=>({}));
+  const jobsValue = body.jobs;
+  const rawJobs: Record<string, unknown>[] = Array.isArray(jobsValue)
+    ? jobsValue.filter((job): job is Record<string, unknown> => Boolean(job) && typeof job === 'object' && !Array.isArray(job))
+    : [((body.job && typeof body.job === 'object' && !Array.isArray(body.job)) ? body.job : body) as Record<string, unknown>];
   if (!rawJobs.length || rawJobs.length>500) return NextResponse.json({error:'Upload 1 to 500 jobs at a time'},{status:400});
   try {
-    const rows=rawJobs.map((j:Record<string,unknown>)=>normalize(j));
-    const urls=rows.map(r=>r.apply_url);
+    const rows: NormalizedJob[] = rawJobs.map(normalize);
+    const urls = rows.map((row: NormalizedJob) => row.apply_url);
     const {data:existing}=await getSupabaseAdminClient().from('jobs').select('apply_url').in('apply_url',urls);
-    const existingSet=new Set((existing||[]).map(x=>x.apply_url));
-    const unique=rows.filter(r=>!existingSet.has(r.apply_url));
+    const existingSet = new Set(((existing || []) as ExistingJob[]).map((row: ExistingJob) => row.apply_url));
+    const unique = rows.filter((row: NormalizedJob) => !existingSet.has(row.apply_url));
     if (!unique.length) return NextResponse.json({inserted:0,skipped:rows.length});
     const {error}=await getSupabaseAdminClient().from('jobs').insert(unique);
     if(error) throw new Error(error.message);
