@@ -120,7 +120,7 @@ export async function getRelatedJobs(job: Job, limit = 4): Promise<Job[]> {
 export async function recordClick(jobId: string, referrer?: string | null) {
   try {
     const supabase = getSupabaseAdminClient();
-    const { error } = await supabase.from('clicks').insert({ job_id: jobId, referrer: referrer || null });
+    const { error } = await supabase.from('outbound_clicks').insert({ job_id: jobId, referrer: referrer || null });
     if (error) console.error('Supabase click insert error:', error.message);
   } catch (error) {
     console.error('Click tracking unavailable:', error instanceof Error ? error.message : error);
