@@ -14,11 +14,26 @@ type LeverPosting = {
   };
 };
 
+type LeverImportOptions = {
+  companyName?: string;
+  defaultCountryCode?: string;
+};
+
 function slugify(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 120);
 }
 
-function inferLocation(raw = '') {
+function countryNameFromCode(code = '') {
+  const normalized = code.toUpperCase();
+  if (normalized === 'US') return 'United States';
+  if (normalized === 'CA') return 'Canada';
+  if (normalized === 'IN') return 'India';
+  if (normalized === 'GB') return 'United Kingdom';
+  if (normalized === 'AU') return 'Australia';
+  return '';
+}
+
+function inferLocation(raw = '', defaultCountryCode = '') {
   const remote = /remote/i.test(raw);
   const parts = raw.split(',').map(v => v.trim()).filter(Boolean);
   const lower = raw.toLowerCase();
@@ -29,6 +44,10 @@ function inferLocation(raw = '') {
   else if (/india/i.test(raw)) { country = 'India'; countryCode = 'IN'; }
   else if (/united kingdom|\buk\b|england|scotland|wales/i.test(raw)) { country = 'United Kingdom'; countryCode = 'GB'; }
   else if (/australia/i.test(raw)) { country = 'Australia'; countryCode = 'AU'; }
+  else if (defaultCountryCode) {
+    countryCode = defaultCountryCode.toUpperCase();
+    country = countryNameFromCode(countryCode);
+  }
 
   const workMode = remote ? 'Remote' : /hybrid/i.test(lower) ? 'Hybrid' : 'On-site';
   return {
@@ -48,11 +67,11 @@ function buildSummary(posting: LeverPosting, company: string, location: string) 
   return `${company} is hiring for ${posting.text}${where}. This is listed as a ${commitment} opportunity. Review the original employer posting for complete responsibilities, qualifications, compensation, eligibility and application details.`;
 }
 
-export async function importLeverSite(site: string) {
+export async function importLeverSite(site: string, options: LeverImportOptions = {}) {
   if (!/^[a-zA-Z0-9_-]+$/.test(site)) throw new Error('Invalid Lever site name');
   const supabase = getSupabaseAdminClient();
   const source = `Lever:${site}`;
-  const company = site.replace(/[-_]/g, ' ');
+  const company = options.companyName?.trim() || site.replace(/[-_]/g, ' ');
 
   const { data: run, error: runError } = await supabase
     .from('import_runs')
@@ -67,7 +86,7 @@ export async function importLeverSite(site: string) {
     const postings = await response.json() as LeverPosting[];
 
     const rows = postings.map(posting => {
-      const loc = inferLocation(posting.categories?.location || '');
+      const loc = inferLocation(posting.categories?.location || '', options.defaultCountryCode || '');
       return {
         slug: `${slugify(posting.text)}-${posting.id.slice(0, 8)}`,
         title: posting.text,
@@ -97,6 +116,22 @@ export async function importLeverSite(site: string) {
     if (rows.length) {
       const { error } = await supabase.from('jobs').upsert(rows, { onConflict: 'source,source_job_id' });
       if (error) throw new Error(error.message);
+
+      const currentIds = postings.map(posting => posting.id);
+      const { error: deactivateError } = await supabase
+        .from('jobs')
+        .update({ status: 'inactive', updated_at: new Date().toISOString() })
+        .eq('source', source)
+        .eq('status', 'active')
+        .not('source_job_id', 'in', `(${currentIds.map(id => `"${id}"`).join(',')})`);
+      if (deactivateError) throw new Error(deactivateError.message);
+    } else {
+      const { error: deactivateAllError } = await supabase
+        .from('jobs')
+        .update({ status: 'inactive', updated_at: new Date().toISOString() })
+        .eq('source', source)
+        .eq('status', 'active');
+      if (deactivateAllError) throw new Error(deactivateAllError.message);
     }
 
     await supabase.from('import_runs').update({ finished_at: new Date().toISOString(), imported_count: rows.length }).eq('id', run.id);
