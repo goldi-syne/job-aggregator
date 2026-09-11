@@ -14,7 +14,7 @@ function pageHref(params: Record<string,string|undefined>, page: number) {
 
 export default async function JobsPage({ searchParams }: { searchParams: Promise<Record<string,string|undefined>> }) {
   const p = await searchParams;
-  const allJobs = getJobs({
+  const allJobs = await getJobs({
     q: p.q,
     location: p.location,
     country: p.country,
