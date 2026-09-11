@@ -1,30 +1,12 @@
 import db from './db';
 
 export type Job = {
-  id: string;
-  slug: string;
-  title: string;
-  company: string;
-  location: string;
-  experience: string;
-  jobType: string;
-  skills: string[];
-  summary: string;
-  applyUrl: string;
-  source: string;
-  sourceUrl?: string;
-  postedAt: string;
-  expiresAt?: string;
-  remote: boolean;
-  countryCode: string;
-  country: string;
-  state: string;
-  city: string;
-  workMode: string;
-  category: string;
-  salaryMin?: number;
-  salaryMax?: number;
-  salaryCurrency: string;
+  id: string; slug: string; title: string; company: string; location: string;
+  experience: string; jobType: string; skills: string[]; summary: string;
+  applyUrl: string; source: string; sourceUrl?: string; postedAt: string;
+  expiresAt?: string; remote: boolean; countryCode: string; country: string;
+  state: string; city: string; workMode: string; category: string;
+  salaryMin?: number; salaryMax?: number; salaryCurrency: string;
 };
 
 type JobRow = {
@@ -37,19 +19,17 @@ type JobRow = {
 };
 
 export type JobFilters = {
-  q?: string;
-  location?: string;
-  country?: string;
-  state?: string;
-  jobType?: string;
-  remote?: boolean;
+  q?: string; location?: string; country?: string; state?: string; jobType?: string;
+  category?: string; workMode?: string; remote?: boolean;
 };
 
 function mapJob(row: JobRow): Job {
+  let skills: string[] = [];
+  try { skills = JSON.parse(row.skills || '[]'); } catch { skills = []; }
   return {
     id: String(row.id), slug: row.slug, title: row.title, company: row.company,
     location: row.location, experience: row.experience, jobType: row.job_type,
-    skills: JSON.parse(row.skills || '[]'), summary: row.summary, applyUrl: row.apply_url,
+    skills, summary: row.summary, applyUrl: row.apply_url,
     source: row.source, sourceUrl: row.source_url || undefined, postedAt: row.posted_at,
     expiresAt: row.expires_at || undefined, remote: Boolean(row.remote),
     countryCode: row.country_code, country: row.country, state: row.state, city: row.city,
@@ -76,6 +56,8 @@ export function getJobs(filters: JobFilters = {}): Job[] {
     if (filters.country && job.countryCode.toLowerCase() !== filters.country.toLowerCase()) return false;
     if (filters.state && job.state.toLowerCase() !== filters.state.toLowerCase()) return false;
     if (filters.jobType && job.jobType.toLowerCase() !== filters.jobType.toLowerCase()) return false;
+    if (filters.category && job.category.toLowerCase() !== filters.category.toLowerCase()) return false;
+    if (filters.workMode && job.workMode.toLowerCase() !== filters.workMode.toLowerCase()) return false;
     if (filters.remote && !job.remote) return false;
     return true;
   });
@@ -89,6 +71,10 @@ export function getJob(slug: string): Job | undefined {
 export function getJobById(id: string): Job | undefined {
   const row = db.prepare(`SELECT * FROM jobs WHERE id = ? AND status = 'active' LIMIT 1`).get(id) as JobRow | undefined;
   return row ? mapJob(row) : undefined;
+}
+
+export function getRelatedJobs(job: Job, limit = 4): Job[] {
+  return getJobs({ country: job.countryCode }).filter(candidate => candidate.id !== job.id && (candidate.category === job.category || candidate.city === job.city || candidate.remote === job.remote)).slice(0, limit);
 }
 
 export function recordClick(jobId: string, referrer?: string | null) {
