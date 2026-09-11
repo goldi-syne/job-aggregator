@@ -9,11 +9,10 @@ JobPulse is a no-login job discovery site focused on the United States with worl
 - Keyword, location, country, job type and work-mode filters
 - Pagination and empty states
 - Individual SEO-friendly job pages
-- `JobPosting` structured data for active job pages
+- `JobPosting` structured data
 - Related jobs
 - Outbound apply redirects with click tracking
-- Local SQLite development database
-- Supabase production schema in `supabase/schema.sql`
+- Supabase production database
 - Lever public job-board importer with source deduplication
 - Dynamic sitemap and robots configuration
 - About, Privacy and Terms pages
@@ -30,36 +29,47 @@ npm run dev
 
 Open http://localhost:3000.
 
-Demo jobs are disabled by default. To use the local sample listings during development only, set:
+## Supabase setup
+
+1. Create a Supabase project.
+2. Run `supabase/schema.sql` in the Supabase SQL Editor.
+3. Set these variables locally and in Vercel:
 
 ```env
-SEED_DEMO_JOBS=true
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+SUPABASE_SECRET_KEY=sb_secret_...
+IMPORT_SECRET=use-a-long-random-secret
+NEXT_PUBLIC_SITE_URL=https://your-domain.example
 ```
 
-## Import a Lever job board locally
+The publishable key is used for public job reads under Row Level Security. The secret key is server-only and is used for imports and click tracking. Never commit the secret key.
 
-Set a long `IMPORT_SECRET` in `.env.local`, start the app and send a POST request to `/api/import/lever` with header `x-import-secret` and JSON body:
+## Lever importer
+
+Send a POST request to `/api/import/lever` with header `x-import-secret` and JSON body:
 
 ```json
 { "site": "lever-site-name" }
 ```
 
-Only import job sources whose public feed/API and terms permit this use. Do not scrape LinkedIn or republish restricted content.
+The importer writes through the server-only Supabase client, deduplicates on source + source job ID, and creates a concise original summary instead of republishing the full source description.
 
-## Production database
+Only import sources whose public feed/API and terms permit aggregation. Do not scrape LinkedIn.
 
-1. Create a Supabase project.
-2. Run `supabase/schema.sql` in the Supabase SQL editor.
-3. Configure the Supabase URL, publishable key and service-role key as server environment variables.
-4. Complete the Supabase data-adapter activation before deploying the database-backed site to Vercel.
+## Vercel deployment
 
-The current application continues to use SQLite until that production adapter is activated, so SQLite should be treated as local development storage only.
+1. Import this GitHub repository into Vercel.
+2. Add the environment variables above for Production, Preview and Development as appropriate.
+3. Deploy.
+4. Set `NEXT_PUBLIC_SITE_URL` to the deployed HTTPS domain and redeploy so canonical URLs and the sitemap use the production domain.
+5. Verify `/`, `/jobs`, one job detail page, `/sitemap.xml`, and an outbound `/go/{id}` redirect.
 
-## Deployment checklist
+## Before public launch
 
-- Set `NEXT_PUBLIC_SITE_URL` to the real HTTPS domain.
-- Use an online persistent database before public Vercel deployment.
-- Import only permitted job sources and keep expired jobs inactive.
-- Configure analytics after choosing a provider.
-- Add an approved advertising provider only after its site/account approval.
-- Keep private keys and import secrets in deployment environment variables, never in GitHub.
+- Run the Supabase schema.
+- Add permitted real job sources.
+- Rotate any secret key that has ever been exposed.
+- Configure analytics.
+- Add ad network code only after approval.
+- Add scheduled imports/expiry synchronization when source coverage is ready.
