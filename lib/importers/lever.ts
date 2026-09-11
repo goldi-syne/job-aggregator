@@ -113,25 +113,17 @@ export async function importLeverSite(site: string, options: LeverImportOptions 
       };
     });
 
+    const now = new Date().toISOString();
+    const { error: deactivateError } = await supabase
+      .from('jobs')
+      .update({ status: 'inactive', updated_at: now })
+      .eq('source', source)
+      .eq('status', 'active');
+    if (deactivateError) throw new Error(deactivateError.message);
+
     if (rows.length) {
       const { error } = await supabase.from('jobs').upsert(rows, { onConflict: 'source,source_job_id' });
       if (error) throw new Error(error.message);
-
-      const currentIds = postings.map(posting => posting.id);
-      const { error: deactivateError } = await supabase
-        .from('jobs')
-        .update({ status: 'inactive', updated_at: new Date().toISOString() })
-        .eq('source', source)
-        .eq('status', 'active')
-        .not('source_job_id', 'in', `(${currentIds.map(id => `"${id}"`).join(',')})`);
-      if (deactivateError) throw new Error(deactivateError.message);
-    } else {
-      const { error: deactivateAllError } = await supabase
-        .from('jobs')
-        .update({ status: 'inactive', updated_at: new Date().toISOString() })
-        .eq('source', source)
-        .eq('status', 'active');
-      if (deactivateAllError) throw new Error(deactivateAllError.message);
     }
 
     await supabase.from('import_runs').update({ finished_at: new Date().toISOString(), imported_count: rows.length }).eq('id', run.id);
