@@ -8,7 +8,7 @@ type Props = { params: Promise<{slug:string}> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
-  const job = getJob(slug);
+  const job = await getJob(slug);
   if (!job) return { title: 'Job not found' };
   const description = `${job.title} at ${job.company}${job.location ? ` in ${job.location}` : ''}. View details and apply on the original source.`;
   return {
@@ -21,10 +21,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function JobPage({params}:Props){
   const {slug}=await params;
-  const job=getJob(slug);
+  const job=await getJob(slug);
   if(!job) notFound();
   const salary = formatSalary(job);
-  const related = getRelatedJobs(job, 4);
+  const related = await getRelatedJobs(job, 4);
 
   const structuredData: Record<string, unknown> = {
     '@context': 'https://schema.org/', '@type': 'JobPosting', title: job.title,
