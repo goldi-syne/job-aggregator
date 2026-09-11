@@ -79,9 +79,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_jobs_city ON jobs(city);
   CREATE INDEX IF NOT EXISTS idx_jobs_remote ON jobs(remote);
   CREATE INDEX IF NOT EXISTS idx_clicks_job_id ON clicks(job_id);
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_source_identity
-    ON jobs(source, source_job_id)
-    WHERE source_job_id IS NOT NULL AND source_job_id <> '';
+  DROP INDEX IF EXISTS idx_jobs_source_identity;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_source_identity ON jobs(source, source_job_id);
 `);
 
 const count = db.prepare('SELECT COUNT(*) AS count FROM jobs').get() as { count: number };
