@@ -1,4 +1,4 @@
-import db from '../db';
+import { getSupabaseAdminClient } from '../supabase';
 
 type LeverPosting = {
   id: string;
@@ -12,9 +12,6 @@ type LeverPosting = {
     team?: string;
     department?: string;
   };
-  descriptionPlain?: string;
-  additionalPlain?: string;
-  lists?: Array<{ text?: string; content?: string }>;
 };
 
 function slugify(value: string) {
@@ -24,80 +21,88 @@ function slugify(value: string) {
 function inferLocation(raw = '') {
   const remote = /remote/i.test(raw);
   const parts = raw.split(',').map(v => v.trim()).filter(Boolean);
+  const lower = raw.toLowerCase();
+  let country = '';
+  let countryCode = '';
+  if (/united states|\busa\b|\bu\.s\.\b/i.test(raw)) { country = 'United States'; countryCode = 'US'; }
+  else if (/canada/i.test(raw)) { country = 'Canada'; countryCode = 'CA'; }
+  else if (/india/i.test(raw)) { country = 'India'; countryCode = 'IN'; }
+  else if (/united kingdom|\buk\b|england|scotland|wales/i.test(raw)) { country = 'United Kingdom'; countryCode = 'GB'; }
+  else if (/australia/i.test(raw)) { country = 'Australia'; countryCode = 'AU'; }
+
+  const workMode = remote ? 'Remote' : /hybrid/i.test(lower) ? 'Hybrid' : 'On-site';
   return {
     location: raw || (remote ? 'Remote' : 'Location not specified'),
     city: remote ? '' : (parts[0] || ''),
     state: remote ? '' : (parts[1] || ''),
-    country: /canada/i.test(raw) ? 'Canada' : /india/i.test(raw) ? 'India' : /united kingdom|uk/i.test(raw) ? 'United Kingdom' : 'United States',
-    countryCode: /canada/i.test(raw) ? 'CA' : /india/i.test(raw) ? 'IN' : /united kingdom|uk/i.test(raw) ? 'GB' : 'US',
+    country,
+    countryCode,
     remote,
-    workMode: remote ? 'Remote' : 'On-site',
+    workMode,
   };
+}
+
+function buildSummary(posting: LeverPosting, company: string, location: string) {
+  const commitment = posting.categories?.commitment || 'role';
+  const where = location && location !== 'Location not specified' ? ` in ${location}` : '';
+  return `${company} is hiring for ${posting.text}${where}. This is listed as a ${commitment} opportunity. Review the original employer posting for complete responsibilities, qualifications, compensation, eligibility and application details.`;
 }
 
 export async function importLeverSite(site: string) {
   if (!/^[a-zA-Z0-9_-]+$/.test(site)) throw new Error('Invalid Lever site name');
-  const started = db.prepare('INSERT INTO import_runs (source) VALUES (?)').run(`lever:${site}`);
-  const runId = Number(started.lastInsertRowid);
+  const supabase = getSupabaseAdminClient();
+  const source = `Lever:${site}`;
+  const company = site.replace(/[-_]/g, ' ');
+
+  const { data: run, error: runError } = await supabase
+    .from('import_runs')
+    .insert({ source })
+    .select('id')
+    .single();
+  if (runError) throw new Error(runError.message);
 
   try {
     const response = await fetch(`https://api.lever.co/v0/postings/${encodeURIComponent(site)}?mode=json`, { cache: 'no-store' });
     if (!response.ok) throw new Error(`Lever returned HTTP ${response.status}`);
     const postings = await response.json() as LeverPosting[];
 
-    const upsert = db.prepare(`
-      INSERT INTO jobs (
-        slug, title, company, location, experience, job_type, skills, summary,
-        apply_url, source, source_url, source_job_id, posted_at, remote,
-        country_code, country, state, city, work_mode, category, status, updated_at
-      ) VALUES (
-        @slug, @title, @company, @location, '', @job_type, '[]', @summary,
-        @apply_url, @source, @source_url, @source_job_id, @posted_at, @remote,
-        @country_code, @country, @state, @city, @work_mode, @category, 'active', CURRENT_TIMESTAMP
-      )
-      ON CONFLICT(source, source_job_id) DO UPDATE SET
-        title=excluded.title, location=excluded.location, job_type=excluded.job_type,
-        summary=excluded.summary, apply_url=excluded.apply_url, source_url=excluded.source_url,
-        posted_at=excluded.posted_at, remote=excluded.remote, country_code=excluded.country_code,
-        country=excluded.country, state=excluded.state, city=excluded.city,
-        work_mode=excluded.work_mode, category=excluded.category, status='active', updated_at=CURRENT_TIMESTAMP
-    `);
-
-    let imported = 0;
-    const saveAll = db.transaction((items: LeverPosting[]) => {
-      for (const posting of items) {
-        const loc = inferLocation(posting.categories?.location || '');
-        const summary = [posting.descriptionPlain, posting.additionalPlain]
-          .filter(Boolean).join('\n\n').trim().slice(0, 8000) || 'View the original posting for complete job details.';
-        upsert.run({
-          slug: `${slugify(posting.text)}-${posting.id.slice(0, 8)}`,
-          title: posting.text,
-          company: site.replace(/[-_]/g, ' '),
-          location: loc.location,
-          job_type: posting.categories?.commitment || 'Full time',
-          summary,
-          apply_url: posting.applyUrl || posting.hostedUrl,
-          source: `Lever:${site}`,
-          source_url: posting.hostedUrl,
-          source_job_id: posting.id,
-          posted_at: new Date(posting.createdAt).toISOString(),
-          remote: loc.remote ? 1 : 0,
-          country_code: loc.countryCode,
-          country: loc.country,
-          state: loc.state,
-          city: loc.city,
-          work_mode: loc.workMode,
-          category: posting.categories?.team || posting.categories?.department || '',
-        });
-        imported += 1;
-      }
+    const rows = postings.map(posting => {
+      const loc = inferLocation(posting.categories?.location || '');
+      return {
+        slug: `${slugify(posting.text)}-${posting.id.slice(0, 8)}`,
+        title: posting.text,
+        company,
+        location: loc.location,
+        experience: '',
+        job_type: posting.categories?.commitment || 'Full time',
+        skills: [],
+        summary: buildSummary(posting, company, loc.location),
+        apply_url: posting.applyUrl || posting.hostedUrl,
+        source,
+        source_url: posting.hostedUrl,
+        source_job_id: posting.id,
+        posted_at: new Date(posting.createdAt).toISOString(),
+        remote: loc.remote,
+        country_code: loc.countryCode,
+        country: loc.country,
+        state: loc.state,
+        city: loc.city,
+        work_mode: loc.workMode,
+        category: posting.categories?.team || posting.categories?.department || '',
+        status: 'active',
+        updated_at: new Date().toISOString(),
+      };
     });
 
-    saveAll(postings);
-    db.prepare('UPDATE import_runs SET finished_at=CURRENT_TIMESTAMP, imported_count=? WHERE id=?').run(imported, runId);
-    return { site, imported };
+    if (rows.length) {
+      const { error } = await supabase.from('jobs').upsert(rows, { onConflict: 'source,source_job_id' });
+      if (error) throw new Error(error.message);
+    }
+
+    await supabase.from('import_runs').update({ finished_at: new Date().toISOString(), imported_count: rows.length }).eq('id', run.id);
+    return { site, imported: rows.length };
   } catch (error) {
-    db.prepare('UPDATE import_runs SET finished_at=CURRENT_TIMESTAMP, error=? WHERE id=?').run(error instanceof Error ? error.message : 'Unknown error', runId);
+    await supabase.from('import_runs').update({ finished_at: new Date().toISOString(), error: error instanceof Error ? error.message : 'Unknown error' }).eq('id', run.id);
     throw error;
   }
 }

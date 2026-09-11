@@ -2,9 +2,9 @@ import { formatSalary, getJobs } from '@/lib/jobs';
 
 export const dynamic = 'force-dynamic';
 
-export default function Home() {
-  const jobs = getJobs();
-  const usJobs = getJobs({ country: 'US' });
+export default async function Home() {
+  const jobs = await getJobs();
+  const usJobs = await getJobs({ country: 'US' });
 
   return <>
     <section className="hero">
@@ -39,7 +39,7 @@ export default function Home() {
     </section>
 
     <section className="wrap" style={{paddingTop:0}}>
-      <div className="sectionHead"><div><h2>Explore worldwide</h2><p>Our data model supports jobs from any country and currency.</p></div><a href="/jobs">All jobs →</a></div>
+      <div className="sectionHead"><div><h2>Explore worldwide</h2><p>Search jobs across countries, cities and remote work modes.</p></div><a href="/jobs">All jobs →</a></div>
       <div className="grid">
         <a className="card" href="/jobs?country=US"><h3>United States</h3><p>Our primary market: states, cities, remote and hybrid roles.</p></a>
         <a className="card" href="/jobs?remote=true"><h3>Remote worldwide</h3><p>Find jobs that can be performed away from an office.</p></a>
