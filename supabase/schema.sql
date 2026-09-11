@@ -28,12 +28,10 @@ create table if not exists jobs (
   salary_currency text not null default 'USD',
   status text not null default 'active',
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  unique (source, source_job_id)
 );
 
-create unique index if not exists jobs_source_job_unique
-  on jobs(source, source_job_id)
-  where source_job_id is not null;
 create index if not exists jobs_status_posted_idx on jobs(status, posted_at desc);
 create index if not exists jobs_country_idx on jobs(country_code);
 create index if not exists jobs_state_idx on jobs(state);
@@ -56,8 +54,20 @@ create table if not exists import_runs (
   error text
 );
 
-alter table jobs enable row level security;
+create table if not exists sources (
+  id bigint generated always as identity primary key,
+  name text not null,
+  source_type text not null,
+  site_id text not null,
+  company_name text,
+  default_country_code text,
+  enabled boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (source_type, site_id)
+);
 
+alter table jobs enable row level security;
 drop policy if exists "Public can read active jobs" on jobs;
 create policy "Public can read active jobs"
 on jobs for select
@@ -66,5 +76,6 @@ using (status = 'active' and (expires_at is null or expires_at >= now()));
 
 alter table outbound_clicks enable row level security;
 alter table import_runs enable row level security;
+alter table sources enable row level security;
 
--- Writes should be performed only by server-side code using the service-role key.
+-- Server-side imports and click tracking use a Supabase secret key, which bypasses RLS.
