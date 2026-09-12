@@ -47,7 +47,7 @@ export async function GET() {
   if (!(await isAdminAuthenticated())) return NextResponse.json({error:'Unauthorized'},{status:401});
   const supabase=getSupabaseAdminClient();
   const [{data,error},{data:runs}] = await Promise.all([
-    supabase.from('jobs').select('id,title,company,location,country,job_type,work_mode,experience,skills,summary,source,source_url,status,posted_at,expires_at,apply_url').order('created_at',{ascending:false}).limit(200),
+    supabase.from('jobs').select('id,slug,title,company,location,country,job_type,work_mode,experience,skills,summary,source,source_url,status,posted_at,expires_at,apply_url').order('created_at',{ascending:false}).limit(200),
     supabase.from('import_runs').select('source,started_at,finished_at,imported_count,error').order('started_at',{ascending:false}).limit(10)
   ]);
   if(error) return NextResponse.json({error:error.message},{status:500});
