@@ -12,6 +12,13 @@ function pageHref(params: Record<string,string|undefined>, page: number) {
   return query ? `/jobs?${query}` : '/jobs';
 }
 
+function sourceLabel(source:string){
+  if(source.startsWith('Lever:')) return 'Company ATS';
+  if(source.toLowerCase().includes('linkedin')) return 'LinkedIn discovery';
+  if(source.toLowerCase().startsWith('manual')) return 'Manually verified';
+  return source || 'Original source';
+}
+
 export default async function JobsPage({ searchParams }: { searchParams: Promise<Record<string,string|undefined>> }) {
   const p = await searchParams;
   const allJobs = await getJobs({
@@ -53,14 +60,14 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
 
     <div className="resultsHeader"><p><strong>{allJobs.length}</strong> opportunities found</p>{Object.values(p).some(Boolean) && <a href="/jobs">Clear filters</a>}</div>
 
-    {jobs.length === 0 ? <div className="emptyState"><h2>No matching jobs yet</h2><p>Try a broader keyword or location, or clear your filters. New jobs can be added automatically from supported sources.</p><a className="buttonSecondary" href="/jobs">Browse all jobs</a></div> : <div className="list">{jobs.map(job => {
+    {jobs.length === 0 ? <div className="emptyState"><h2>No matching jobs yet</h2><p>Try a broader keyword or location, or clear your filters. New jobs are added from supported employer sources and manually verified listings.</p><a className="buttonSecondary" href="/jobs">Browse all jobs</a></div> : <div className="list">{jobs.map(job => {
       const salary = formatSalary(job);
       return <a className="jobrow" href={`/jobs/${job.slug}`} key={job.id}>
         <div>
           <span className="fresh">{job.countryCode || 'GLOBAL'} · {job.workMode || 'Flexible'}</span>
           <h2>{job.title}</h2>
           <p>{job.company} · {job.location}</p>
-          <div className="meta"><span>{job.jobType}</span>{job.experience && <span>{job.experience}</span>}{salary && <span>{salary}</span>}</div>
+          <div className="meta"><span>{job.jobType}</span>{job.experience && <span>{job.experience}</span>}{salary && <span>{salary}</span>}<span className="sourceBadge">{sourceLabel(job.source)}</span></div>
           <div className="skills">{job.skills.slice(0,5).map(s=><span key={s}>{s}</span>)}</div>
         </div>
         <strong>View job →</strong>
