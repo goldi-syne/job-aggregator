@@ -10,7 +10,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
   const job = await getJob(slug);
   if (!job) return { title: 'Job not found' };
-  const description = `${job.title} at ${job.company}${job.location ? ` in ${job.location}` : ''}. View details and apply on the original source.`;
+  const description = `${job.title} at ${job.company}${job.location ? ` in ${job.location}` : ''}. View responsibilities, qualifications, experience and application details.`;
   return {
     title: `${job.title} at ${job.company}`,
     description,
@@ -26,14 +26,21 @@ export default async function JobPage({params}:Props){
   const salary = formatSalary(job);
   const related = await getRelatedJobs(job, 4);
 
+  const fullDescription = [
+    job.summary,
+    ...job.sections.flatMap(section => [section.title, ...section.items]),
+    job.description,
+  ].filter(Boolean).join('\n');
+
   const structuredData: Record<string, unknown> = {
     '@context': 'https://schema.org/', '@type': 'JobPosting', title: job.title,
-    description: job.summary, datePosted: job.postedAt,
+    description: fullDescription, datePosted: job.postedAt,
     employmentType: job.jobType.toUpperCase().replace(/[^A-Z]+/g, '_').replace(/^_|_$/g, ''),
     hiringOrganization: { '@type': 'Organization', name: job.company },
     url: job.sourceUrl || job.applyUrl,
   };
   if (job.expiresAt) structuredData.validThrough = job.expiresAt;
+  if (job.experience) structuredData.experienceRequirements = job.experience;
   if (job.remote) {
     structuredData.jobLocationType = 'TELECOMMUTE';
     if (job.country) structuredData.applicantLocationRequirements = { '@type': 'Country', name: job.country };
@@ -51,13 +58,34 @@ export default async function JobPage({params}:Props){
         <article>
           <span className="fresh">{job.countryCode || 'GLOBAL'} · {job.workMode || 'Flexible'}</span>
           <h1>{job.title}</h1><h2>{job.company}</h2>
-          <div className="facts"><span>📍 {job.location}</span><span>💼 {job.experience || job.jobType}</span><span>⏱ {job.jobType}</span>{salary && <span>💰 {salary}</span>}</div>
+          <div className="facts">
+            <span>📍 {job.location}</span>
+            {job.experience && <span>🎓 {job.experience} experience</span>}
+            <span>⏱ {job.jobType}</span>
+            {salary && <span>💰 {salary}</span>}
+          </div>
+
           <div className="ad">Advertisement</div>
-          <h2>About the role</h2><p>{job.summary}</p>
+
+          <h2>Job description</h2>
+          <div className="jobText">{job.summary.split(/\n+/).filter(Boolean).map((paragraph, index)=><p key={index}>{paragraph}</p>)}</div>
+
+          {job.sections.map((section, sectionIndex) => <section className="jobSection" key={`${section.title}-${sectionIndex}`}>
+            <h2>{section.title}</h2>
+            <ul>{section.items.map((item, itemIndex)=><li key={itemIndex}>{item}</li>)}</ul>
+          </section>)}
+
+          {job.description && <section className="jobSection">
+            <h2>Additional details</h2>
+            <div className="jobText">{job.description.split(/\n+/).filter(Boolean).map((paragraph, index)=><p key={index}>{paragraph}</p>)}</div>
+          </section>}
+
+          {job.salaryDescription && <section className="jobSection"><h2>Compensation</h2><p>{job.salaryDescription}</p></section>}
+
           {job.category && <><h2>Category</h2><p><a href={`/jobs?category=${encodeURIComponent(job.category)}`}>{job.category}</a></p></>}
           {job.skills.length > 0 && <><h2>Skills</h2><div className="skills">{job.skills.map(s=><span key={s}>{s}</span>)}</div></>}
           <div className="ad">Advertisement</div>
-          <p className="source">Source: {job.source}. Always verify compensation, eligibility, location and other details on the original application website.</p>
+          <p className="source">Source: {job.source}. Job details are taken from the public employer/ATS posting. Always verify the latest compensation, eligibility and application requirements on the original source.</p>
         </article>
         <aside><h3>Interested in this role?</h3><p>You will be redirected to the original employer or ATS application source.</p><a className="apply" href={`/go/${job.id}`} rel="nofollow">Apply on official source ↗</a><small>No JobPulse account required.</small></aside>
       </div>
