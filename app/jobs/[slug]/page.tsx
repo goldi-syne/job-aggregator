@@ -1,10 +1,25 @@
 import type { Metadata } from 'next';
 import { formatSalary, getJob, getRelatedJobs } from '@/lib/jobs';
+import { absoluteUrl } from '@/lib/site';
 import { notFound } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
 
 type Props = { params: Promise<{slug:string}> };
+
+function schemaEmploymentType(jobType: string): string | string[] {
+  const value = jobType.toLowerCase();
+  const types: string[] = [];
+  if (value.includes('full') && value.includes('time')) types.push('FULL_TIME');
+  if (value.includes('part') && value.includes('time')) types.push('PART_TIME');
+  if (value.includes('contract')) types.push('CONTRACTOR');
+  if (value.includes('temporary') || value.includes('temp')) types.push('TEMPORARY');
+  if (value.includes('intern')) types.push('INTERN');
+  if (value.includes('volunteer')) types.push('VOLUNTEER');
+  if (value.includes('per diem')) types.push('PER_DIEM');
+  if (types.length === 0) return 'OTHER';
+  return types.length === 1 ? types[0] : types;
+}
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
@@ -33,21 +48,35 @@ export default async function JobPage({params}:Props){
   ].filter(Boolean).join('\n');
 
   const structuredData: Record<string, unknown> = {
-    '@context': 'https://schema.org/', '@type': 'JobPosting', title: job.title,
-    description: fullDescription, datePosted: job.postedAt,
-    employmentType: job.jobType.toUpperCase().replace(/[^A-Z]+/g, '_').replace(/^_|_$/g, ''),
+    '@context': 'https://schema.org/',
+    '@type': 'JobPosting',
+    title: job.title,
+    description: fullDescription,
+    datePosted: job.postedAt,
+    employmentType: schemaEmploymentType(job.jobType),
     hiringOrganization: { '@type': 'Organization', name: job.company },
-    url: job.sourceUrl || job.applyUrl,
+    url: absoluteUrl(`/jobs/${job.slug}`),
+    directApply: false,
   };
   if (job.expiresAt) structuredData.validThrough = job.expiresAt;
   if (job.experience) structuredData.experienceRequirements = job.experience;
   if (job.remote) {
     structuredData.jobLocationType = 'TELECOMMUTE';
     if (job.country) structuredData.applicantLocationRequirements = { '@type': 'Country', name: job.country };
+    else if (job.countryCode) structuredData.applicantLocationRequirements = { '@type': 'Country', name: job.countryCode };
   } else {
-    structuredData.jobLocation = { '@type': 'Place', address: { '@type': 'PostalAddress', addressLocality: job.city || undefined, addressRegion: job.state || undefined, addressCountry: job.countryCode || undefined } };
+    structuredData.jobLocation = {
+      '@type': 'Place',
+      address: {
+        '@type': 'PostalAddress',
+        addressLocality: job.city || undefined,
+        addressRegion: job.state || undefined,
+        addressCountry: job.countryCode || undefined,
+      },
+    };
   }
-  if (job.salaryMin || job.salaryMax) structuredData.baseSalary = { '@type': 'MonetaryAmount', currency: job.salaryCurrency || 'USD', value: { '@type': 'QuantitativeValue', minValue: job.salaryMin, maxValue: job.salaryMax, unitText: 'YEAR' } };
+  // Salary remains visible to users, but is intentionally omitted from JobPosting
+  // structured data until the source pay interval (hour/year/etc.) is stored reliably.
   const jsonLd = JSON.stringify(structuredData).replace(/</g, '\\u003c');
 
   return <>
