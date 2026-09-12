@@ -116,6 +116,12 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   if (!(await isAdminAuthenticated())) return NextResponse.json({error:'Unauthorized'},{status:401});
   const body: Record<string, unknown> = await request.json().catch(()=>({}));
+  if(body.action==='delete_inactive') {
+    const supabase=getSupabaseAdminClient();
+    const {count,error}=await supabase.from('jobs').delete({count:'exact'}).neq('status','active');
+    if(error) return NextResponse.json({error:error.message},{status:500});
+    return NextResponse.json({ok:true,deleted:count||0});
+  }
   const id=text(body.id); if(!id) return NextResponse.json({error:'Job id required'},{status:400});
   const {error}=await getSupabaseAdminClient().from('jobs').delete().eq('id',id);
   return error?NextResponse.json({error:error.message},{status:500}):NextResponse.json({ok:true});
