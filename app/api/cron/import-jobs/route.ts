@@ -1,17 +1,9 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseAdminClient } from '@/lib/supabase';
-import { importLeverSite } from '@/lib/importers/lever';
+import { runEnabledImports } from '@/lib/importers/run-enabled';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
-
-type SourceRow = {
-  source_type: string;
-  site_id: string;
-  company_name: string | null;
-  default_country_code: string | null;
-};
 
 function isAuthorized(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
@@ -29,43 +21,14 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const supabase = getSupabaseAdminClient();
-  const { data, error } = await supabase
-    .from('sources')
-    .select('source_type,site_id,company_name,default_country_code')
-    .eq('enabled', true)
-    .order('id', { ascending: true });
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  try {
+    const result = await runEnabledImports();
+    return NextResponse.json(result);
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Import failed' }, { status: 500 });
   }
+}
 
-  const sources = (data || []) as SourceRow[];
-  const results: Array<Record<string, unknown>> = [];
-
-  for (const source of sources) {
-    try {
-      if (source.source_type.toLowerCase() === 'lever') {
-        const result = await importLeverSite(source.site_id, {
-          companyName: source.company_name || undefined,
-          defaultCountryCode: source.default_country_code || undefined,
-        });
-        results.push({ source: `Lever:${source.site_id}`, ok: true, ...result });
-      } else {
-        results.push({ source: `${source.source_type}:${source.site_id}`, ok: false, error: 'Unsupported source type' });
-      }
-    } catch (error) {
-      results.push({
-        source: `${source.source_type}:${source.site_id}`,
-        ok: false,
-        error: error instanceof Error ? error.message : 'Import failed',
-      });
-    }
-  }
-
-  return NextResponse.json({
-    ranAt: new Date().toISOString(),
-    sourceCount: sources.length,
-    results,
-  });
+export async function POST(request: Request) {
+  return GET(request);
 }
