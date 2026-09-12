@@ -7,14 +7,15 @@ function text(v: unknown) { return typeof v === 'string' ? v.trim() : ''; }
 function bool(v: unknown) { return v === true || String(v).toLowerCase() === 'true' || String(v).toLowerCase() === 'yes'; }
 function countryCode(country: string) { const x=country.toLowerCase(); if(x.includes('united states')||x==='usa'||x==='us') return 'US'; if(x==='india') return 'IN'; if(x==='canada') return 'CA'; if(x.includes('united kingdom')||x==='uk') return 'GB'; if(x==='australia') return 'AU'; return ''; }
 
-function normalize(raw: Record<string, unknown>) {
+function normalize(raw: Record<string, unknown>, existingId?: string) {
   const title=text(raw.title), company=text(raw.company), applyUrl=text(raw.apply_url || raw.applyUrl);
   if (!title || !company || !applyUrl) throw new Error('title, company and apply_url are required');
+  try { new URL(applyUrl); } catch { throw new Error('apply_url must be a valid URL'); }
   const country=text(raw.country), city=text(raw.city), state=text(raw.state), location=text(raw.location) || [city,state,country].filter(Boolean).join(', ') || 'Location not specified';
   const source=text(raw.source) || 'Manual';
-  const uid=crypto.randomUUID();
+  const uid=existingId || crypto.randomUUID();
   return {
-    source_job_id:`manual-${uid}`,
+    source_job_id: existingId ? undefined : `manual-${uid}`,
     slug:`${slugify(title)}-${slugify(company)}-${uid.slice(0,8)}`,
     title, company, location,
     experience:text(raw.experience),
@@ -26,7 +27,7 @@ function normalize(raw: Record<string, unknown>) {
     source_url:text(raw.source_url || raw.sourceUrl) || null,
     posted_at:text(raw.posted_at || raw.postedAt) || new Date().toISOString(),
     expires_at:text(raw.expires_at || raw.expiresAt) || null,
-    remote:bool(raw.remote),
+    remote:bool(raw.remote) || text(raw.work_mode || raw.workMode).toLowerCase()==='remote',
     country_code:text(raw.country_code || raw.countryCode) || countryCode(country),
     country, state, city,
     work_mode:text(raw.work_mode || raw.workMode) || (bool(raw.remote) ? 'Remote' : 'On-site'),
@@ -40,12 +41,27 @@ function normalize(raw: Record<string, unknown>) {
 }
 
 type NormalizedJob = ReturnType<typeof normalize>;
-type ExistingJob = { apply_url: string };
+type ExistingJob = { apply_url: string; id?: string };
 
 export async function GET() {
   if (!(await isAdminAuthenticated())) return NextResponse.json({error:'Unauthorized'},{status:401});
-  const {data,error}=await getSupabaseAdminClient().from('jobs').select('id,title,company,location,source,status,posted_at,apply_url').order('created_at',{ascending:false}).limit(100);
-  return error ? NextResponse.json({error:error.message},{status:500}) : NextResponse.json({jobs:data||[]});
+  const supabase=getSupabaseAdminClient();
+  const [{data,error},{data:runs}] = await Promise.all([
+    supabase.from('jobs').select('id,title,company,location,country,job_type,work_mode,experience,skills,summary,source,source_url,status,posted_at,expires_at,apply_url').order('created_at',{ascending:false}).limit(200),
+    supabase.from('import_runs').select('source,started_at,finished_at,imported_count,error').order('started_at',{ascending:false}).limit(10)
+  ]);
+  if(error) return NextResponse.json({error:error.message},{status:500});
+  const jobs=data||[];
+  const now=Date.now();
+  const stats={
+    total:jobs.length,
+    active:jobs.filter(j=>j.status==='active' && (!j.expires_at || new Date(j.expires_at).getTime()>=now)).length,
+    inactive:jobs.filter(j=>j.status!=='active').length,
+    expired:jobs.filter(j=>j.expires_at && new Date(j.expires_at).getTime()<now).length,
+    manual:jobs.filter(j=>String(j.source||'').toLowerCase().startsWith('manual') || String(j.source||'').toLowerCase().includes('linkedin')).length,
+    imported:jobs.filter(j=>String(j.source||'').startsWith('Lever:')).length,
+  };
+  return NextResponse.json({jobs,stats,importRuns:runs||[]});
 }
 
 export async function POST(request: Request) {
@@ -57,16 +73,46 @@ export async function POST(request: Request) {
     : [((body.job && typeof body.job === 'object' && !Array.isArray(body.job)) ? body.job : body) as Record<string, unknown>];
   if (!rawJobs.length || rawJobs.length>500) return NextResponse.json({error:'Upload 1 to 500 jobs at a time'},{status:400});
   try {
-    const rows: NormalizedJob[] = rawJobs.map(normalize);
-    const urls = rows.map((row: NormalizedJob) => row.apply_url);
+    const rows: NormalizedJob[] = rawJobs.map(raw=>normalize(raw));
+    const urls = rows.map(row => row.apply_url);
     const {data:existing}=await getSupabaseAdminClient().from('jobs').select('apply_url').in('apply_url',urls);
-    const existingSet = new Set(((existing || []) as ExistingJob[]).map((row: ExistingJob) => row.apply_url));
-    const unique = rows.filter((row: NormalizedJob) => !existingSet.has(row.apply_url));
-    if (!unique.length) return NextResponse.json({inserted:0,skipped:rows.length});
+    const existingSet = new Set(((existing || []) as ExistingJob[]).map(row => row.apply_url));
+    const seen=new Set<string>();
+    const unique = rows.filter(row => !existingSet.has(row.apply_url) && !seen.has(row.apply_url) && Boolean(seen.add(row.apply_url)));
+    if (!unique.length) return NextResponse.json({inserted:0,skipped:rows.length,duplicates:urls});
     const {error}=await getSupabaseAdminClient().from('jobs').insert(unique);
     if(error) throw new Error(error.message);
     return NextResponse.json({inserted:unique.length,skipped:rows.length-unique.length});
   } catch(error) {
     return NextResponse.json({error:error instanceof Error?error.message:'Import failed'},{status:400});
   }
+}
+
+export async function PATCH(request: Request) {
+  if (!(await isAdminAuthenticated())) return NextResponse.json({error:'Unauthorized'},{status:401});
+  const body: Record<string, unknown> = await request.json().catch(()=>({}));
+  const id=text(body.id); if(!id) return NextResponse.json({error:'Job id required'},{status:400});
+  try {
+    if(body.action==='deactivate' || body.action==='activate') {
+      const status=body.action==='activate'?'active':'inactive';
+      const {error}=await getSupabaseAdminClient().from('jobs').update({status,updated_at:new Date().toISOString()}).eq('id',id);
+      if(error) throw new Error(error.message);
+      return NextResponse.json({ok:true,status});
+    }
+    const raw=(body.job && typeof body.job==='object' && !Array.isArray(body.job)?body.job:body) as Record<string,unknown>;
+    const row=normalize(raw,id); delete row.source_job_id;
+    const {data:dupe}=await getSupabaseAdminClient().from('jobs').select('id').eq('apply_url',row.apply_url).neq('id',id).limit(1);
+    if(dupe?.length) return NextResponse.json({error:'Another job already uses this Apply URL'},{status:409});
+    const {error}=await getSupabaseAdminClient().from('jobs').update(row).eq('id',id);
+    if(error) throw new Error(error.message);
+    return NextResponse.json({ok:true});
+  } catch(error) { return NextResponse.json({error:error instanceof Error?error.message:'Update failed'},{status:400}); }
+}
+
+export async function DELETE(request: Request) {
+  if (!(await isAdminAuthenticated())) return NextResponse.json({error:'Unauthorized'},{status:401});
+  const body: Record<string, unknown> = await request.json().catch(()=>({}));
+  const id=text(body.id); if(!id) return NextResponse.json({error:'Job id required'},{status:400});
+  const {error}=await getSupabaseAdminClient().from('jobs').delete().eq('id',id);
+  return error?NextResponse.json({error:error.message},{status:500}):NextResponse.json({ok:true});
 }
