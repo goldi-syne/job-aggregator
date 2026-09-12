@@ -43,23 +43,28 @@ function normalize(raw: Record<string, unknown>, existingId?: string) {
 type NormalizedJob = ReturnType<typeof normalize>;
 type ExistingJob = { apply_url: string; id?: string };
 
+type StatsRow = { status: string; expires_at: string | null; source: string | null };
+
 export async function GET() {
   if (!(await isAdminAuthenticated())) return NextResponse.json({error:'Unauthorized'},{status:401});
   const supabase=getSupabaseAdminClient();
-  const [{data,error},{data:runs}] = await Promise.all([
+  const [{data,error},{data:runs},{data:statsData,error:statsError}] = await Promise.all([
     supabase.from('jobs').select('id,slug,title,company,location,country,job_type,work_mode,experience,skills,summary,source,source_url,status,posted_at,expires_at,apply_url').order('created_at',{ascending:false}).limit(200),
-    supabase.from('import_runs').select('source,started_at,finished_at,imported_count,error').order('started_at',{ascending:false}).limit(10)
+    supabase.from('import_runs').select('source,started_at,finished_at,imported_count,error').order('started_at',{ascending:false}).limit(10),
+    supabase.from('jobs').select('status,expires_at,source')
   ]);
   if(error) return NextResponse.json({error:error.message},{status:500});
+  if(statsError) return NextResponse.json({error:statsError.message},{status:500});
   const jobs=data||[];
+  const allJobs=(statsData||[]) as StatsRow[];
   const now=Date.now();
   const stats={
-    total:jobs.length,
-    active:jobs.filter(j=>j.status==='active' && (!j.expires_at || new Date(j.expires_at).getTime()>=now)).length,
-    inactive:jobs.filter(j=>j.status!=='active').length,
-    expired:jobs.filter(j=>j.expires_at && new Date(j.expires_at).getTime()<now).length,
-    manual:jobs.filter(j=>String(j.source||'').toLowerCase().startsWith('manual') || String(j.source||'').toLowerCase().includes('linkedin')).length,
-    imported:jobs.filter(j=>String(j.source||'').startsWith('Lever:')).length,
+    total:allJobs.length,
+    active:allJobs.filter(j=>j.status==='active' && (!j.expires_at || new Date(j.expires_at).getTime()>=now)).length,
+    inactive:allJobs.filter(j=>j.status!=='active').length,
+    expired:allJobs.filter(j=>j.expires_at && new Date(j.expires_at).getTime()<now).length,
+    manual:allJobs.filter(j=>String(j.source||'').toLowerCase().startsWith('manual') || String(j.source||'').toLowerCase().includes('linkedin')).length,
+    imported:allJobs.filter(j=>String(j.source||'').startsWith('Lever:')).length,
   };
   return NextResponse.json({jobs,stats,importRuns:runs||[]});
 }
