@@ -54,6 +54,9 @@ export async function runEnabledImports() {
     successCount: results.filter(r => r.ok === true).length,
     failureCount: results.filter(r => r.ok !== true).length,
     importedCount: results.reduce((sum, r) => sum + (typeof r.imported === 'number' ? r.imported : 0), 0),
+    newCount: results.reduce((sum, r) => sum + (typeof r.newCount === 'number' ? r.newCount : 0), 0),
+    updatedCount: results.reduce((sum, r) => sum + (typeof r.updatedCount === 'number' ? r.updatedCount : 0), 0),
+    deactivatedCount: results.reduce((sum, r) => sum + (typeof r.deactivatedCount === 'number' ? r.deactivatedCount : 0), 0),
     results,
   };
 }
