@@ -72,6 +72,15 @@ function mapJob(row: JobRow): Job {
   };
 }
 
+function applyJobTypeFilter<T extends { ilike: (column: string, pattern: string) => T }>(query: T, jobType: string): T {
+  const normalized = jobType.trim().toLowerCase();
+  if (normalized === 'full time' || normalized === 'full-time') return query.ilike('job_type', '%full%time%');
+  if (normalized === 'part time' || normalized === 'part-time') return query.ilike('job_type', '%part%time%');
+  if (normalized === 'contract' || normalized === 'contractor') return query.ilike('job_type', '%contract%');
+  if (normalized === 'internship' || normalized === 'intern') return query.ilike('job_type', '%intern%');
+  return query.ilike('job_type', jobType);
+}
+
 export async function getJobs(filters: JobFilters = {}): Promise<Job[]> {
   const supabase = getSupabasePublicClient();
   if (!supabase) return [];
@@ -85,7 +94,7 @@ export async function getJobs(filters: JobFilters = {}): Promise<Job[]> {
 
   if (filters.country) query = query.eq('country_code', filters.country.toUpperCase());
   if (filters.state) query = query.ilike('state', filters.state);
-  if (filters.jobType) query = query.ilike('job_type', filters.jobType);
+  if (filters.jobType) query = applyJobTypeFilter(query, filters.jobType);
   if (filters.category) query = query.ilike('category', filters.category);
   if (filters.workMode) query = query.ilike('work_mode', filters.workMode);
   if (filters.remote) query = query.eq('remote', true);
