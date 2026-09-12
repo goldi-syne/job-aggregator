@@ -17,6 +17,7 @@ type LeverPosting = {
 type LeverImportOptions = {
   companyName?: string;
   defaultCountryCode?: string;
+  lookbackDays?: number;
 };
 
 function slugify(value: string) {
@@ -72,6 +73,8 @@ export async function importLeverSite(site: string, options: LeverImportOptions 
   const supabase = getSupabaseAdminClient();
   const source = `Lever:${site}`;
   const company = options.companyName?.trim() || site.replace(/[-_]/g, ' ');
+  const lookbackDays = Math.max(1, Math.min(options.lookbackDays ?? 3, 30));
+  const cutoff = Date.now() - lookbackDays * 24 * 60 * 60 * 1000;
 
   const { data: run, error: runError } = await supabase
     .from('import_runs')
@@ -84,8 +87,9 @@ export async function importLeverSite(site: string, options: LeverImportOptions 
     const response = await fetch(`https://api.lever.co/v0/postings/${encodeURIComponent(site)}?mode=json`, { cache: 'no-store' });
     if (!response.ok) throw new Error(`Lever returned HTTP ${response.status}`);
     const postings = await response.json() as LeverPosting[];
+    const recentPostings = postings.filter(posting => Number.isFinite(posting.createdAt) && posting.createdAt >= cutoff);
 
-    const rows = postings.map(posting => {
+    const rows = recentPostings.map(posting => {
       const loc = inferLocation(posting.categories?.location || '', options.defaultCountryCode || '');
       return {
         slug: `${slugify(posting.text)}-${posting.id.slice(0, 8)}`,
@@ -127,7 +131,7 @@ export async function importLeverSite(site: string, options: LeverImportOptions 
     }
 
     await supabase.from('import_runs').update({ finished_at: new Date().toISOString(), imported_count: rows.length }).eq('id', run.id);
-    return { site, imported: rows.length };
+    return { site, imported: rows.length, lookbackDays, available: postings.length };
   } catch (error) {
     await supabase.from('import_runs').update({ finished_at: new Date().toISOString(), error: error instanceof Error ? error.message : 'Unknown error' }).eq('id', run.id);
     throw error;
