@@ -240,6 +240,19 @@ export async function importLeverSite(site: string, options: LeverImportOptions 
       };
     });
 
+    const recentIds = new Set(rows.map(row => row.source_job_id));
+    const { data: existingRows, error: existingError } = await supabase
+      .from('jobs')
+      .select('source_job_id,status')
+      .eq('source', source);
+    if (existingError) throw new Error(existingError.message);
+
+    const existingIds = new Set((existingRows || []).map(row => String(row.source_job_id || '')));
+    const activeIds = new Set((existingRows || []).filter(row => row.status === 'active').map(row => String(row.source_job_id || '')));
+    const newCount = rows.filter(row => !existingIds.has(row.source_job_id)).length;
+    const updatedCount = rows.length - newCount;
+    const deactivatedCount = [...activeIds].filter(id => id && !recentIds.has(id)).length;
+
     const now = new Date().toISOString();
     const { error: deactivateError } = await supabase
       .from('jobs')
@@ -254,7 +267,7 @@ export async function importLeverSite(site: string, options: LeverImportOptions 
     }
 
     await supabase.from('import_runs').update({ finished_at: new Date().toISOString(), imported_count: rows.length }).eq('id', run.id);
-    return { site, imported: rows.length, lookbackDays, available: postings.length };
+    return { site, imported: rows.length, newCount, updatedCount, deactivatedCount, lookbackDays, available: postings.length };
   } catch (error) {
     await supabase.from('import_runs').update({ finished_at: new Date().toISOString(), error: error instanceof Error ? error.message : 'Unknown error' }).eq('id', run.id);
     throw error;
