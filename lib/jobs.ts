@@ -1,8 +1,11 @@
 import { getSupabaseAdminClient, getSupabasePublicClient } from './supabase';
 
+export type JobSection = { title: string; items: string[] };
+
 export type Job = {
   id: string; slug: string; title: string; company: string; location: string;
   experience: string; jobType: string; skills: string[]; summary: string;
+  description: string; sections: JobSection[]; salaryDescription: string;
   applyUrl: string; source: string; sourceUrl?: string; postedAt: string;
   expiresAt?: string; remote: boolean; countryCode: string; country: string;
   state: string; city: string; workMode: string; category: string;
@@ -12,6 +15,7 @@ export type Job = {
 type JobRow = {
   id: string; slug: string; title: string; company: string; location: string;
   experience: string | null; job_type: string | null; skills: string[] | null; summary: string | null;
+  description: string | null; sections: unknown; salary_description: string | null;
   apply_url: string; source: string; source_url: string | null; posted_at: string;
   expires_at: string | null; remote: boolean | null; country_code: string | null; country: string | null;
   state: string | null; city: string | null; work_mode: string | null; category: string | null;
@@ -22,6 +26,19 @@ export type JobFilters = {
   q?: string; location?: string; country?: string; state?: string; jobType?: string;
   category?: string; workMode?: string; remote?: boolean;
 };
+
+function normalizeSections(value: unknown): JobSection[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(section => {
+      if (!section || typeof section !== 'object') return null;
+      const raw = section as { title?: unknown; items?: unknown };
+      const title = typeof raw.title === 'string' ? raw.title.trim() : '';
+      const items = Array.isArray(raw.items) ? raw.items.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : [];
+      return title && items.length ? { title, items } : null;
+    })
+    .filter((section): section is JobSection => Boolean(section));
+}
 
 function mapJob(row: JobRow): Job {
   return {
@@ -34,6 +51,9 @@ function mapJob(row: JobRow): Job {
     jobType: row.job_type || '',
     skills: Array.isArray(row.skills) ? row.skills : [],
     summary: row.summary || 'View the original posting for complete job details.',
+    description: row.description || '',
+    sections: normalizeSections(row.sections),
+    salaryDescription: row.salary_description || '',
     applyUrl: row.apply_url,
     source: row.source,
     sourceUrl: row.source_url || undefined,
